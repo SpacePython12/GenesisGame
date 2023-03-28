@@ -1,5 +1,5 @@
 {
     "files.associations": {
-        "sys.h": "c"
+        "tilengine.h": "c"
     }
 }
