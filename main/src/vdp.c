@@ -13,9 +13,8 @@ typedef struct VDPDMARequest {
 } VDPDMARequest;
 
 #define dmaQueueCapacity 32
-
-static VDPDMARequest dmaQueue[dmaQueueCapacity];
-static u32 dmaQueueFront = 0, dmaQueueBack = dmaQueueCapacity - 1, dmaQueueSize = 0;
+VDPDMARequest dmaQueue[dmaQueueCapacity];
+u32 dmaQueueFront = 0, dmaQueueBack = dmaQueueCapacity - 1, dmaQueueSize = 0;
 
 static bool initialized = false;
 
@@ -76,18 +75,6 @@ void vdpWriteVSRAM(u8 addr, u16 val) {
     vdpWriteData(val);
 }
 
-void vdpDoDMA(const void * src68k, u16 dstVDP, u16 len, u8 dest, u8 flags) {
-    vdpPushDMA((VDPDMARequest){.dstVDP=dstVDP, .size=len, .src68k=(u32)src68k, .flags=(VDP_DMA_FLAG | flags), .dest=(dest | VDP_WRITE_DEST), .val=0});
-}
-
-void vdpDoCopy(u16 srcVDP, u16 dstVDP, u16 len, u8 flags) {
-    vdpPushDMA((VDPDMARequest){.dstVDP=dstVDP, .size=len, .src68k=0x1800000 | srcVDP, .flags=(VDP_DMA_FLAG | VDP_VCOPY_FLAG | flags), .dest=0, .val=0});
-}
-
-void vdpDoFill(u16 dstVDP, u16 len, u8 val, u8 flags) {
-    vdpPushDMA((VDPDMARequest){.dstVDP=dstVDP, .size=len, .src68k=0x1000000, .flags=(VDP_DMA_FLAG | VDP_VCOPY_FLAG | flags), .dest=0, .val=(u16)val << 8});
-}
-
 void vdpPushDMA(VDPDMARequest request) {
     if (dmaQueueSize == dmaQueueCapacity) return;
     dmaQueueBack = (dmaQueueBack + 1) % dmaQueueCapacity;
@@ -107,6 +94,18 @@ void vdpPopDMA() {
     vdpRegister(0x17, (((request.src68k >> 1) & 0xFF0000) >> 16));
     vdpAddress(request.dstVDP, request.dest, request.flags);
     if (request.src68k & 0xC00000 == 0x800000) vdpWriteData(request.val);
+}
+
+void vdpDoDMA(const void * src68k, u16 dstVDP, u16 len, u8 dest, u8 flags) {
+    vdpPushDMA((VDPDMARequest){.dstVDP=dstVDP, .size=len, .src68k=(u32)src68k, .flags=(VDP_DMA_FLAG | flags), .dest=(dest | VDP_WRITE_DEST), .val=0});
+}
+
+void vdpDoCopy(u16 srcVDP, u16 dstVDP, u16 len, u8 flags) {
+    vdpPushDMA((VDPDMARequest){.dstVDP=dstVDP, .size=len, .src68k=0x1800000 | srcVDP, .flags=(VDP_DMA_FLAG | VDP_VCOPY_FLAG | flags), .dest=0, .val=0});
+}
+
+void vdpDoFill(u16 dstVDP, u16 len, u8 val, u8 flags) {
+    vdpPushDMA((VDPDMARequest){.dstVDP=dstVDP, .size=len, .src68k=0x1000000, .flags=(VDP_DMA_FLAG | VDP_VCOPY_FLAG | flags), .dest=0, .val=(u16)val << 8});
 }
 
 bool vdpDMAActive() {

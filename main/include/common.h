@@ -8,5 +8,6 @@
 #include "vdp.h"
 #include "kdebug.h"
 #include "gamepad.h"
+#include "tinyalloc.h"
 
 #endif
