@@ -12,7 +12,9 @@ typedef signed long     s64;
 
 typedef unsigned int uint;
 
+#ifndef __cplusplus
 typedef u8 bool;
+#endif
 
 #define false 0
 #define true  1

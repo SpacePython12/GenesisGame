@@ -1,3 +1,5 @@
+#include <SDL2/SDL_keycode.h>
+#include <SDL2/SDL_pixels.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -5,12 +7,17 @@
 #include <time.h>
 
 #include <SDL2/SDL.h>
+#include <unistd.h>
+#include <zip.h>
 
-#include "common.h"
+#include "../include/common.h"
 
 static SDL_Window * Win;
 static SDL_Renderer * Rend;
 static SDL_Texture * FBuf;
+
+static zip_t * archive;
+static int ziperr;
 
 static u8 * TileMem;
 static u16 * LayoutMem;
@@ -45,7 +52,7 @@ static ScrollType VScrollMode = SCROLL_PLANE;
 
 #define SPRITE(index) (SpriteMem+((index)*8))
 
-#define PALETTE(index) (ColorMem+((index)*2))
+#define PALETTE(index) (ColorMem[index])
 
 #define S16TONORM(val) (((double)val/(double)0x100))
 #define NORMTOS16(val) ((s16)(val*(double)0x100))
@@ -53,6 +60,8 @@ static ScrollType VScrollMode = SCROLL_PLANE;
 #define BOOLNEGATE(val, sign) (sign ? -val : val)
 
 void Eng_Init(u16 width, u16 height) {
+    archive = zip_open("data.pak", 0, &ziperr);
+
     if (SDL_Init(SDL_INIT_EVERYTHING)) {
         printf("SDL failed to initialize.\n");
         exit(0);
@@ -69,7 +78,7 @@ void Eng_Init(u16 width, u16 height) {
     HScrollMem = calloc(0x200, 2);
     VScrollMem = calloc(0x80, 2);
     SpriteMem = calloc(0x80, 8);
-    ColorMem = calloc(0x100, 2);
+    ColorMem = calloc(0x200, 2);
     int i;
     for (i = 0; i < PLANE_COUNT; i++) {
         Mode7Tables[i].a = 0x100;
@@ -91,7 +100,7 @@ void Eng_Destroy() {
     free(SpriteMem);
     free(ColorMem);
     free(LayoutMem);
-    free(JoyMem);
+    zip_close(archive);
 }
 
 void Eng_SetHBlankCB(HBlankCB cb) {
@@ -124,6 +133,7 @@ void Eng_Access(u32 addr, u16 * val, bool write) {
     } else if (addr >= 0x20C00 && addr < 0x20E00) { // Color Memory
         if (!write) *val = *(u16 *)(ColorMem+(addr & 0x1FF));
         else *(u16 *)(ColorMem+(addr & 0x1FF)) = *val & 0xFFFE;
+
     } else if (addr >= 0x20E00 && addr < 0x20E40) { // Joypads
         if (!write) *val = *(u16 *)(JoyPads+(addr & 0x3F));
     } else {
@@ -140,6 +150,89 @@ u16 Eng_Read(u32 addr) {
 void Eng_Write(u32 addr, u16 val, u16 mask) {
     u16 tmp = (val & mask) | (Eng_Read(addr) & ~mask); 
     Eng_Access(addr, &tmp, true);
+}
+
+void Eng_OpenResourceRaw(const char * parent, const char * name, zip_file_t ** file) {
+    char * path = calloc(strlen(parent)+strlen(name)+2, 1);
+    strcat(path, parent);
+    strcat(path, ":");
+    strcat(path,name);
+    for (uint i = 0; i < strlen(path); i++) {
+        if (path[i] == ':') path[i] = '/';
+    }
+    struct zip_stat stat;
+    zip_stat_init(&stat);
+    *file = zip_fopen(archive, path, 0);
+}
+
+size_t Eng_OpenResource(const char * namespace, const char * name, void * ptr, size_t offset, size_t size) {
+    size_t ret = 0;
+    zip_file_t * file;
+    Eng_OpenResourceRaw(namespace, name, &file);
+    if (ptr) {
+        zip_fseek(file, offset, SEEK_SET);
+        ret = zip_fread(file, ptr, size);
+    } else {
+        zip_fseek(file, 0, SEEK_END);
+        ret = zip_ftell(file);
+    }
+    zip_fclose(file);
+    return ret;
+}
+
+void Eng_OpenPalette(const char * name, u8 offset, u8 count) {
+    zip_file_t * file;
+    Eng_OpenResourceRaw("palette", name, &file);
+    u16 size = offset + count >= 0x100 ? 0x100-offset : count;
+    zip_fread(file, ColorMem+(offset*2), size*2);
+    zip_fclose(file);
+}
+
+void Eng_LoadPalette(const u16 * palette, u8 offset, u8 count) {
+    u16 size = offset + count >= 0x100 ? 0x100-offset : count;
+    memmove(ColorMem+(offset*2), palette, size*2);
+}
+
+void Eng_StorePalette(u16 * palette, u8 offset, u8 count) {
+    u16 size = offset + count >= 0x100 ? 0x100-offset : count;
+    memmove(palette, ColorMem+(offset*2), size*2);
+}
+
+void Eng_OpenTiles(const char * name, u16 offset, u16 count) {
+    zip_file_t * file;
+    Eng_OpenResourceRaw("tileset", name, &file);
+    
+    u32 size = offset + count >= 0x400 ? 0x400-offset : count;
+    zip_fread(file, TileMem+(offset*0x40), size*0x40);
+    zip_fclose(file);
+}
+
+void Eng_LoadTiles(const u8 * tiles, u16 offset, u16 count) {
+    u32 size = offset + count >= 0x400 ? 0x400-offset : count;
+    memmove(TileMem+(offset*0x40), tiles, size*0x40);
+}
+
+void Eng_StoreTiles(u8 * tiles, u16 offset, u16 count) {
+    u32 size = offset + count >= 0x400 ? 0x400-offset : count;
+    memmove(tiles, TileMem+(offset*0x40), size*0x40);
+}
+
+void Eng_OpenLayout(const char * name, u16 offset, u16 count) {
+    zip_file_t * file;
+    Eng_OpenResourceRaw("tilemap", name, &file);
+    u32 size = offset + count >= 0x8000 ? 0x8000-offset : count;
+    zip_fread(file, LayoutMem+(offset*2), size*2);
+    zip_fclose(file);
+}
+
+void Eng_LoadLayout(const u16 * layout, u16 offset, u16 count) {
+    u32 size = offset + count >= 0x8000 ? 0x8000-offset : count;
+    memmove(LayoutMem+(offset*2), layout, size*2);
+}
+
+void Eng_StoreLayout(u16 * layout, u16 offset, u16 count) {
+    u32 size = offset + count >= 0x8000 ? 0x8000-offset : count;
+    memmove(layout, LayoutMem+(offset*2), size*2);
 }
 
 static inline s16 Eng_GetRowScroll(Plane plane, u16 row) {
@@ -175,13 +268,13 @@ static inline u8 Eng_GetTileColor(Plane plane, u16 x, u16 y) {
     u16 ty = S16TONORM(Mode7Tables[plane].c) * ((double)x + (double)(Mode7Tables[plane].h) - (double)(Mode7Tables[plane].x)) + \
         S16TONORM(Mode7Tables[plane].d) * ((double)y + (double)(Mode7Tables[plane].v) - (double)(Mode7Tables[plane].y)) + (double)(Mode7Tables[plane].y);
     //printf("X: %x, Y: %x, TX: %x, TY: %x\n", x, y, tx, ty);
-    if (true) {
+    if (false) {
         if (tx >= 0x800 || ty >= 0x800) return 0;
     } else {
-        tx %= 0x800;
-        ty %= 0x800;
+        tx %= 0x400;
+        ty %= 0x400;
     }
-    u16 tile = *(LAYOUTXY(tx >> 3, ty >> 3, plane)) & (0xFFF0);
+    u16 tile = *(LAYOUTXY(tx >> 3, ty >> 3, plane)) & (0xFFF);
     u8 ind = *(TILEXY(tile % 0x800, tx % 8, ty % 8));
     // printf("Tile: %x, Index: %x\n", tile, ind);
     return ind;
@@ -224,7 +317,18 @@ void Eng_Loop() {
                     break;
                 case SDL_KEYDOWN:
                     switch (event.key.keysym.sym) {
-                        
+                        case SDLK_UP:
+                            Mode7Tables[PLANE_A].v -= 1;
+                            break;
+                        case SDLK_DOWN:
+                            Mode7Tables[PLANE_A].v += 1;
+                            break;
+                        case SDLK_LEFT:
+                            Mode7Tables[PLANE_A].h -= 1;
+                            break;
+                        case SDLK_RIGHT:
+                            Mode7Tables[PLANE_A].h += 1;
+                            break;
                     }
                     break;
             }
@@ -234,15 +338,15 @@ void Eng_Loop() {
         SDL_LockTexture(FBuf, NULL, (void **)&pixels, &pitch);
         for (y = 0; y < h; y++) {
             for (x = 0; x < w; x++) {
-                pixels[x + (y*w)] = *(PALETTE(0));
+                pixels[x + (y*w)] = (PALETTE(0));
                 tmp = Eng_GetTileColor(PLANE_B, x + Eng_GetRowScroll(PLANE_B, y), y + Eng_GetColScroll(PLANE_B, x));
-                if (tmp) pixels[x + (y*w)] = *(PALETTE(tmp & 0xFF));
+                if (tmp) pixels[x + (y*w)] = (PALETTE(tmp & 0xFF));
                 tmp = Eng_GetTileColor(PLANE_A, x + Eng_GetRowScroll(PLANE_A, y), y + Eng_GetColScroll(PLANE_A, x));
-                if (tmp) pixels[x + (y*w)] = *(PALETTE(tmp & 0xFF));
-                for (i = 0; i < 0x80; i++) {
-                    tmp = Eng_GetSpriteColor(i, x - SpriteMem[i].x, y - SpriteMem[i].y);
-                    if (tmp) pixels[x + (y*w)] = *(PALETTE(tmp & 0xFF));
-                }
+                if (tmp) pixels[x + (y*w)] = (PALETTE(tmp & 0xFF));
+                // for (i = 0; i < 0x80; i++) {
+                //     tmp = Eng_GetSpriteColor(i, x - SpriteMem[i].x, y - SpriteMem[i].y);
+                //     if (tmp) pixels[x + (y*w)] = *(PALETTE(tmp & 0xFF));
+                // }
             }
             if (_HBlankCB) _HBlankCB(y);
         }

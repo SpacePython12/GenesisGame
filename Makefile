@@ -3,21 +3,23 @@ LD := ld
 
 SRCDIR := main/src/
 INCDIR := main/include/
+DATDIR := main/data/
 
-CFLAGS := -lc -lSDL2 -lm
+NAME := game
+EXT := 
+
+CFLAGS := -O3
+LIBS := -lSDL2 -lm -lzip
 
 CSOURCES := $(shell find $(SRCDIR) -name '*.c')
 ASOURCES := $(shell find $(SRCDIR) -name '*.S')
-ZSOURCES := $(shell find $(SRCDIR) -name '*.s80')
 OBJECTS := $(patsubst $(SRCDIR)%.c,$(SRCDIR)%.o,$(CSOURCES)) $(patsubst $(SRCDIR)%.S,$(SRCDIR)%.o,$(ASOURCES)) 
-ZBINS := $(patsubst $(SRCDIR)%.s80,$(SRCDIR)%.bin,$(ZSOURCES)) 
 
-image.o: $(OBJECTS) main/data/data.o
-	$(CC) $^ -o $@ $(CFLAGS)
+build: $(NAME)$(EXT)
+
+$(NAME)$(EXT): $(OBJECTS)
+	$(CC) $^ -o $@ $(LIBS)
 #	$(LD) $^ -o $@ --oformat=binary
-
-main/data/data.o: main/data/data.S $(ZBINS)
-	$(CC) -c $< -o $@ -Imain $(CFLAGS)
 
 $(SRCDIR)%.o: $(SRCDIR)%.c
 	$(CC) -c $< -o $@ -I$(INCDIR) $(CFLAGS)
@@ -27,5 +29,10 @@ $(SRCDIR)%.o: $(SRCDIR)%.S
 	$(CC) -c $< -o $@ -I$(INCDIR) $(CFLAGS)
 
 
+
+data: 
+	rm -f data.pak
+	$(MAKE) -C $(DATDIR) all
+
 clean:
-	rm -f $(OBJECTS) $(patsubst $(SRCDIR)%.o,$(SRCDIR)%.o.S,$(OBJECTS)) $(ZBINS) main/image.bin main/image.o main/data/data.o
+	rm -f $(OBJECTS) $(patsubst $(SRCDIR)%.o,$(SRCDIR)%.o.S,$(OBJECTS)) $(NAME)$(EXT)

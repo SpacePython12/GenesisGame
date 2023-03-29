@@ -1,7 +1,8 @@
+#include <stddef.h>
 #ifndef ENGINE_H
 #define ENGINE_H 1
 
-#include "common.h"
+#include "types.h"
 
 typedef struct SpriteDef {
     int x: 12;
@@ -22,6 +23,8 @@ typedef struct TileDef {
     uint tile: 12;
 } TileDef;
 
+#define TILEDEF(tile, hflip, vflip, priority) ((tile & 0xFFF) | ((priority & 1) << 12) | ((vflip & 1) << 13) | ((hflip & 1) << 14))
+
 typedef struct Mode7Table {
     int h: 16;
     int v: 16;
@@ -38,7 +41,7 @@ typedef struct JoyState {
     s16 axes[6];
 } JoyState;
 
-#define X sizeof(JoyState)
+#define X sizeof(TileDef)
 
 typedef void (*HBlankCB)(u16 line); 
 typedef void (*VBlankCB)();
@@ -109,5 +112,19 @@ extern void Eng_Write(u32 addr, u16 val, u16 mask);
 #define Eng_WriteByte(addr, val) {Eng_Write(addr & 0x3FFFE, addr & 1 ? (u16)val : (u16)val << 1, addr & 1 ? 0xFF00 : 0x00FF);}
 #define Eng_WriteWord(addr, val) {Eng_Write(addr, val, 0xFFFF);}
 #define Eng_WriteLong(addr, val) {Eng_Write(addr, (u16)(val >> 16), 0xFFFF); Eng_Write(addr+2, (u16)(val), 0xFFFF);}
+
+extern size_t Eng_OpenResource(const char * namespace_, const char * name, void * ptr, size_t offset, size_t size);
+
+extern void Eng_OpenPalette(const char * name, u8 offset, u8 count);
+extern void Eng_LoadPalette(const u16 * palette, u8 offset, u8 count);
+extern void Eng_StorePalette(u16 * palette, u8 offset, u8 count);
+
+extern void Eng_OpenTiles(const char * name, u16 offset, u16 count);
+extern void Eng_LoadTiles(const u8 * tiles, u16 offset, u16 count);
+extern void Eng_StoreTiles(u8 * tiles, u16 offset, u16 count);
+
+extern void Eng_OpenLayout(const char * name, u16 offset, u16 count);
+extern void Eng_LoadLayout(const u16 * layout, u16 offset, u16 count);
+extern void Eng_StoreLayout(u16 * layout, u16 offset, u16 count);
 
 #endif
