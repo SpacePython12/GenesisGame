@@ -58,3 +58,6 @@ dkms.conf
 main/data/*
 !Makefile
 data.pak
+
+# Build Results
+game*
